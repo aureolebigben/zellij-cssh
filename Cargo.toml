@@ -1,0 +1,8 @@
+[package]
+name = "zellij-cssh"
+version = "0.1.0"
+authors = ["Aureolebigben"]
+edition = "2024"
+
+[dependencies]
+zellij-tile = "0.44.0"
