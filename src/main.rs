@@ -1,10 +1,27 @@
 use zellij_tile::prelude::*;
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 #[derive(Default)]
 struct State {
     // the state of the plugin
+    server_groups: Vec<ServerGroup>,
+    current_selected_list_index: usize,
+    selected_servers: Vec<ServerConfig>,
+}
+
+#[derive(Clone)]
+struct ServerGroup {
+    name: String,
+    opened: bool,
+    servers: Vec<ServerConfig>,
+}
+
+#[derive(Clone)]
+struct ServerConfig {
+    name: String,
+    ip: String,
 }
 
 register_plugin!(State);
@@ -16,6 +33,42 @@ register_plugin!(State);
 
 impl ZellijPlugin for State {
     fn load(&mut self, configuration: BTreeMap<String, String>) {
+        request_permission(&[
+            PermissionType::ChangeApplicationState,
+        ]);
+
+        self.server_groups = vec![
+            ServerGroup {
+                name: "dbs".to_string(),
+                opened: false,
+                servers: vec![
+                    ServerConfig {
+                        name: "db-01".to_string(),
+                        ip: "db-01".to_string(),
+                    },
+                    ServerConfig {
+                        name: "db-02".to_string(),
+                        ip: "db-02".to_string(),
+                    },
+                ],
+            },
+            ServerGroup {
+                name: "deb11".to_string(),
+                opened: false,
+                servers: vec![
+                    ServerConfig {
+                        name: "deb11-01".to_string(),
+                        ip: "deb11-01".to_string(),
+                    },
+                    ServerConfig {
+                        name: "deb11-02".to_string(),
+                        ip: "deb11-02".to_string(),
+                    },
+                ],
+            },
+        ];
+
+        subscribe(&[EventType::Key]);
         // runs once on plugin load, provides the configuration with which this plugin was loaded
         // (if any)
         //
@@ -25,12 +78,59 @@ impl ZellijPlugin for State {
     }
     fn update(&mut self, event: Event) -> bool {
         let mut should_render = false;
-        // react to `Event`s that have been subscribed to (and the plugin has permissions for)
-        // return true if this plugin's `render` function should be called for the plugin to render
-        // itself
+
+        match event {
+            Event::Key(key) => match key.bare_key {
+                BareKey::Down => {
+                    if self.current_selected_list_index < self.get_displayed_lines_number() - 1 {
+                        self.current_selected_list_index += 1;
+                        should_render = true
+                    }
+                }
+                BareKey::Up => {
+                    if self.current_selected_list_index > 0 {
+                        self.current_selected_list_index -= 1;
+                        should_render = true
+                    }
+                }
+                BareKey::Enter => {
+                    let tabname = self.server_groups
+                        .get(self.current_selected_list_index)
+                        .unwrap()
+                        .name
+                        .clone();
+
+                    let panes = self.server_groups.get(self.current_selected_list_index).unwrap().servers.iter().map(|server| {
+                        format!(r#"
+                        ssh {{
+                            args "{serverip}"
+                        }}
+                        "#, serverip = server.ip)
+                    }).collect::<Vec<String>>().join("\n");
+
+                    let layout = format!(r#"
+                    layout {{
+                        pane_template name="ssh" command="ssh" close_on_exit=true
+                        tab name="{tabname}" {{
+                            {panes}
+                            pane size=1 borderless=true {{
+                                plugin location="zellij:compact-bar"
+                            }}
+                        }}
+                    }}
+                    "#);
+                    eprintln!("DEBUG layout:\n{}", layout);
+                    new_tabs_with_layout(&layout);
+                    toggle_active_tab_sync();
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+
         should_render
     }
-    fn pipe (&mut self, pipe_message: PipeMessage) -> bool {
+    fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
         let mut should_render = false;
         // react to data piped to this plugin from the CLI, a keybinding or another plugin
         // read more about pipes: https://zellij.dev/documentation/plugin-pipes
@@ -39,6 +139,34 @@ impl ZellijPlugin for State {
         should_render
     }
     fn render(&mut self, rows: usize, cols: usize) {
-        println!("Hi there! I have {rows} rows and {cols} columns");
+        print_nested_list(self.get_nested_list(self.current_selected_list_index));
+    }
+}
+
+impl State {
+    fn get_nested_list(&self, selected_index: usize) -> Vec<NestedListItem> {
+        self.server_groups
+            .iter()
+            .enumerate()
+            .map(|(index, group)| {
+                let mut item = NestedListItem::new(&group.name);
+
+                if index == selected_index {
+                    item = item.selected();
+                }
+
+                item
+            })
+            .collect()
+    }
+    fn get_displayed_lines_number(&self) -> usize {
+        self.server_groups.len()
+        // self.server_groups.iter().map(|group| {
+        //     if group.opened {
+        //         group.servers.len() + 1
+        //     } else {
+        //         1
+        //     }
+        // }).sum()
     }
 }
