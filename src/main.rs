@@ -1,3 +1,7 @@
+mod servers_config;
+
+use servers_config::{ServerConfig, ServerGroup};
+
 use zellij_tile::prelude::*;
 
 use std::collections::{BTreeMap, HashSet};
@@ -9,18 +13,6 @@ struct State {
     current_selected_list_index: usize,
     selected_servers: HashSet<ServerConfig>,
     configuration: Configuration,
-}
-
-#[derive(Clone)]
-struct ServerGroup {
-    name: String,
-    servers: Vec<ServerConfig>,
-}
-
-#[derive(Clone, Hash, PartialEq, Eq)]
-struct ServerConfig {
-    name: String,
-    host: String,
 }
 
 #[derive(Default)]
@@ -49,32 +41,20 @@ impl ZellijPlugin for State {
         // TODO Remove test data
 
         self.server_groups = vec![
-            ServerGroup {
-                name: "dbs".to_string(),
-                servers: vec![
-                    ServerConfig {
-                        name: "db-01".to_string(),
-                        host: "k-db-01".to_string(),
-                    },
-                    ServerConfig {
-                        name: "db-02".to_string(),
-                        host: "k-db-02".to_string(),
-                    },
+            ServerGroup::new(
+                "dbs".to_string(),
+                vec![
+                    ServerConfig::new("db-01".to_string(), "k-db-01".to_string()),
+                    ServerConfig::new("db-02".to_string(), "k-db-02".to_string()),
                 ],
-            },
-            ServerGroup {
-                name: "deb11".to_string(),
-                servers: vec![
-                    ServerConfig {
-                        name: "deb11-01".to_string(),
-                        host: "deb11-prod01".to_string(),
-                    },
-                    ServerConfig {
-                        name: "deb11-02".to_string(),
-                        host: "deb11-prod02".to_string(),
-                    },
+            ),
+            ServerGroup::new(
+                "deb11".to_string(),
+                vec![
+                    ServerConfig::new("deb11-01".to_string(), "deb11-prod01".to_string()),
+                    ServerConfig::new("deb11-02".to_string(), "deb11-prod02".to_string()),
                 ],
-            },
+            ),
         ];
 
         subscribe(&[EventType::Key]);
@@ -103,7 +83,8 @@ impl ZellijPlugin for State {
                         {
                             match server_idx {
                                 Some(s_idx) => {
-                                    let server = &self.server_groups[group_idx].servers[s_idx];
+                                    let server =
+                                        &self.server_groups[group_idx].get_servers()[s_idx];
                                     if !self.selected_servers.contains(server) {
                                         self.selected_servers.insert(server.clone());
                                     } else {
@@ -114,11 +95,11 @@ impl ZellijPlugin for State {
                                     let group = &self.server_groups[group_idx];
 
                                     if group.all_selected_in(&self.selected_servers) {
-                                        for server in &group.servers {
+                                        for server in group.get_servers() {
                                             self.selected_servers.remove(server);
                                         }
                                     } else {
-                                        for server in &self.server_groups[group_idx].servers {
+                                        for server in self.server_groups[group_idx].get_servers() {
                                             self.selected_servers.insert(server.clone());
                                         }
                                     }
@@ -140,7 +121,7 @@ impl ZellijPlugin for State {
                                 args "{host}"
                             }}
                         "#,
-                                host = server.host
+                                host = server.get_host()
                             )
                         })
                         .collect::<Vec<String>>()
@@ -180,7 +161,7 @@ impl State {
         let mut items = vec![];
 
         for group in self.server_groups.iter() {
-            let mut group_item = NestedListItem::new(&group.name);
+            let mut group_item = NestedListItem::new(&group.get_name());
             let mut servers_items = vec![];
 
             if current_index == selected_index {
@@ -189,8 +170,8 @@ impl State {
 
             current_index += 1;
 
-            for server in group.servers.iter() {
-                let mut server_item = NestedListItem::new(&server.name).indent(1);
+            for server in group.get_servers().iter() {
+                let mut server_item = NestedListItem::new(&server.get_name()).indent(1);
                 if current_index == selected_index {
                     server_item = server_item.selected();
                 }
@@ -215,7 +196,7 @@ impl State {
         // self.server_groups.len()
         self.server_groups
             .iter()
-            .map(|group| group.servers.len() + 1)
+            .map(|group| group.get_servers().len() + 1)
             .sum()
     }
     fn resolve_index(&self, index: usize) -> Option<(usize, Option<usize>)> {
@@ -225,7 +206,7 @@ impl State {
                 return Some((g_idx, None)); // the group itself
             }
             current += 1;
-            for (s_idx, _server) in group.servers.iter().enumerate() {
+            for (s_idx, _server) in group.get_servers().iter().enumerate() {
                 if current == index {
                     return Some((g_idx, Some(s_idx)));
                 }
@@ -233,12 +214,6 @@ impl State {
             }
         }
         None
-    }
-}
-
-impl ServerGroup {
-    fn all_selected_in(&self, servers: &HashSet<ServerConfig>) -> bool {
-        !self.servers.is_empty() && self.servers.iter().all(|server| servers.contains(server))
     }
 }
 
