@@ -5,6 +5,7 @@ use servers_config::{ServerConfig, ServerGroup};
 use zellij_tile::prelude::*;
 
 use std::collections::{BTreeMap, HashSet};
+use std::path::PathBuf;
 
 #[derive(Default)]
 struct State {
@@ -19,6 +20,7 @@ struct State {
 struct Configuration {
     layout: ZellijLayout,
     sync: bool,
+    config_path: PathBuf,
 }
 
 #[derive(Default)]
@@ -37,6 +39,7 @@ impl ZellijPlugin for State {
         request_permission(&[PermissionType::ChangeApplicationState]);
 
         self.configuration = Configuration::from_config(configuration);
+        // self.server_groups = servers_config::load_config_from_path(&self.configuration.config_path);
 
         // TODO Remove test data
 
@@ -57,56 +60,56 @@ impl ZellijPlugin for State {
             ),
         ];
 
+        eprintln!(
+            "DEBUG toml:\n{}",
+            toml::to_string_pretty(&self.server_groups).unwrap()
+        );
+
         subscribe(&[EventType::Key]);
     }
     fn update(&mut self, event: Event) -> bool {
         let mut should_render = false;
 
-        match event {
-            Event::Key(key) => match key.bare_key {
-                BareKey::Down => {
-                    if self.current_selected_list_index < self.get_displayed_lines_number() - 1 {
-                        self.current_selected_list_index += 1;
-                        should_render = true
-                    }
+        if let Event::Key(key) = event {
+            match key.bare_key {
+                BareKey::Down
+                    if self.current_selected_list_index < self.get_displayed_lines_number() - 1 =>
+                {
+                    self.current_selected_list_index += 1;
+                    should_render = true
                 }
-                BareKey::Up => {
-                    if self.current_selected_list_index > 0 {
-                        self.current_selected_list_index -= 1;
-                        should_render = true
-                    }
+                BareKey::Up if self.current_selected_list_index > 0 => {
+                    self.current_selected_list_index -= 1;
+                    should_render = true
                 }
-                BareKey::Char(c) => {
-                    if c == ' ' {
-                        if let Some((group_idx, server_idx)) =
-                            self.resolve_index(self.current_selected_list_index)
-                        {
-                            match server_idx {
-                                Some(s_idx) => {
-                                    let server =
-                                        &self.server_groups[group_idx].get_servers()[s_idx];
-                                    if !self.selected_servers.contains(server) {
-                                        self.selected_servers.insert(server.clone());
-                                    } else {
+                BareKey::Char(' ') => {
+                    if let Some((group_idx, server_idx)) =
+                        self.resolve_index(self.current_selected_list_index)
+                    {
+                        match server_idx {
+                            Some(s_idx) => {
+                                let server = &self.server_groups[group_idx].get_servers()[s_idx];
+                                if !self.selected_servers.contains(server) {
+                                    self.selected_servers.insert(server.clone());
+                                } else {
+                                    self.selected_servers.remove(server);
+                                }
+                            }
+                            None => {
+                                let group = &self.server_groups[group_idx];
+
+                                if group.all_selected_in(&self.selected_servers) {
+                                    for server in group.get_servers() {
                                         self.selected_servers.remove(server);
                                     }
-                                }
-                                None => {
-                                    let group = &self.server_groups[group_idx];
-
-                                    if group.all_selected_in(&self.selected_servers) {
-                                        for server in group.get_servers() {
-                                            self.selected_servers.remove(server);
-                                        }
-                                    } else {
-                                        for server in self.server_groups[group_idx].get_servers() {
-                                            self.selected_servers.insert(server.clone());
-                                        }
+                                } else {
+                                    for server in self.server_groups[group_idx].get_servers() {
+                                        self.selected_servers.insert(server.clone());
                                     }
                                 }
                             }
-                            should_render = true;
                         }
+                        should_render = true;
                     }
                 }
                 BareKey::Enter => {
@@ -136,8 +139,7 @@ impl ZellijPlugin for State {
                     }
                 }
                 _ => {}
-            },
-            _ => {}
+            }
         }
 
         should_render
@@ -161,7 +163,7 @@ impl State {
         let mut items = vec![];
 
         for group in self.server_groups.iter() {
-            let mut group_item = NestedListItem::new(&group.get_name());
+            let mut group_item = NestedListItem::new(group.get_name());
             let mut servers_items = vec![];
 
             if current_index == selected_index {
@@ -171,7 +173,7 @@ impl State {
             current_index += 1;
 
             for server in group.get_servers().iter() {
-                let mut server_item = NestedListItem::new(&server.get_name()).indent(1);
+                let mut server_item = NestedListItem::new(server.get_name()).indent(1);
                 if current_index == selected_index {
                     server_item = server_item.selected();
                 }
@@ -226,7 +228,21 @@ impl Configuration {
                 .unwrap_or(&"false".to_string())
                 .parse()
                 .unwrap(),
+            config_path: config
+                .get("config_path")
+                .map(PathBuf::from)
+                .unwrap_or(Configuration::get_default_config_path()),
         }
+    }
+
+    fn get_default_config_path() -> PathBuf {
+        let base = std::env::var("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".config")
+            });
+
+        base.join("zellij-cssh").join("servers.toml")
     }
 }
 

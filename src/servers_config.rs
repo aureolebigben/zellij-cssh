@@ -1,12 +1,15 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::fs;
+use std::path::PathBuf;
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct ServerGroup {
     name: String,
     servers: Vec<ServerConfig>,
 }
 
-#[derive(Clone, Hash, PartialEq, Eq)]
+#[derive(Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ServerConfig {
     name: String,
     host: String,
@@ -41,4 +44,9 @@ impl ServerConfig {
     pub fn get_host(&self) -> &str {
         &self.host
     }
+}
+
+pub fn load_config_from_path(path: &PathBuf) -> Vec<ServerGroup> {
+    let content = fs::read(path).expect("Unable to read config file");
+    toml::from_slice::<Vec<ServerGroup>>(&content).expect("Unable to parse config file")
 }
