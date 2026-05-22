@@ -26,6 +26,7 @@ struct ServerConfig {
 #[derive(Default)]
 struct Configuration {
     layout: ZellijLayout,
+    sync: bool,
 }
 
 #[derive(Default)]
@@ -148,7 +149,10 @@ impl ZellijPlugin for State {
                     let layout = self.configuration.layout.get_kdl(tab_name, &panes);
                     eprintln!("DEBUG layout:\n{}", layout);
                     new_tabs_with_layout(&layout);
-                    toggle_active_tab_sync();
+
+                    if self.configuration.sync {
+                        toggle_active_tab_sync();
+                    }
                 }
                 _ => {}
             },
@@ -157,15 +161,15 @@ impl ZellijPlugin for State {
 
         should_render
     }
-    fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
-        let mut should_render = false;
+    fn pipe(&mut self, _pipe_message: PipeMessage) -> bool {
+        let should_render = false;
         // react to data piped to this plugin from the CLI, a keybinding or another plugin
         // read more about pipes: https://zellij.dev/documentation/plugin-pipes
         // return true if this plugin's `render` function should be called for the plugin to render
         // itself
         should_render
     }
-    fn render(&mut self, rows: usize, cols: usize) {
+    fn render(&mut self, _rows: usize, _cols: usize) {
         print_nested_list(self.get_nested_list(self.current_selected_list_index));
     }
 }
@@ -239,15 +243,14 @@ impl ServerGroup {
 }
 
 impl Configuration {
-    fn new() -> Self {
-        Configuration {
-            layout: ZellijLayout::Default,
-        }
-    }
-
     fn from_config(config: BTreeMap<String, String>) -> Self {
         Configuration {
             layout: ZellijLayout::from_str(config.get("layout").unwrap_or(&"default".to_string())),
+            sync: config
+                .get("sync")
+                .unwrap_or(&"false".to_string())
+                .parse()
+                .unwrap(),
         }
     }
 }
