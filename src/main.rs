@@ -8,6 +8,7 @@ struct State {
     server_groups: Vec<ServerGroup>,
     current_selected_list_index: usize,
     selected_servers: HashSet<ServerConfig>,
+    configuration: Configuration,
 }
 
 #[derive(Clone)]
@@ -22,23 +23,27 @@ struct ServerConfig {
     host: String,
 }
 
+#[derive(Default)]
 struct Configuration {
+    layout: ZellijLayout,
+}
 
+#[derive(Default)]
+enum ZellijLayout {
+    #[default]
+    Default,
+    Compact,
 }
 
 register_plugin!(State);
 
-// NOTE: you can start a development environment inside Zellij by running `zellij -l zellij.kdl` in
-// this plugin's folder
-//
 // More info on plugins: https://zellij.dev/documentation/plugins
 
 impl ZellijPlugin for State {
     fn load(&mut self, configuration: BTreeMap<String, String>) {
+        request_permission(&[PermissionType::ChangeApplicationState]);
 
-        request_permission(&[
-            PermissionType::ChangeApplicationState,
-        ]);
+        self.configuration = Configuration::from_config(configuration);
 
         // TODO Remove test data
 
@@ -72,12 +77,6 @@ impl ZellijPlugin for State {
         ];
 
         subscribe(&[EventType::Key]);
-        // runs once on plugin load, provides the configuration with which this plugin was loaded
-        // (if any)
-        //
-        // this is a good place to `subscribe` (https://docs.rs/zellij-tile/latest/zellij_tile/shim/fn.subscribe.html)
-        // to `Event`s (https://docs.rs/zellij-tile/latest/zellij_tile/prelude/enum.Event.html)
-        // and `request_permissions` (https://docs.rs/zellij-tile/latest/zellij_tile/shim/fn.request_permission.html)
     }
     fn update(&mut self, event: Event) -> bool {
         let mut should_render = false;
@@ -98,7 +97,9 @@ impl ZellijPlugin for State {
                 }
                 BareKey::Char(c) => {
                     if c == ' ' {
-                        if let Some((group_idx, server_idx)) = self.resolve_index(self.current_selected_list_index) {
+                        if let Some((group_idx, server_idx)) =
+                            self.resolve_index(self.current_selected_list_index)
+                        {
                             match server_idx {
                                 Some(s_idx) => {
                                     let server = &self.server_groups[group_idx].servers[s_idx];
@@ -128,25 +129,23 @@ impl ZellijPlugin for State {
                 }
                 BareKey::Enter => {
                     let tab_name = "cssh";
-                    let panes = self.selected_servers.iter().map(|server| {
-                        format!(r#"
-                        ssh {{
-                            args "{host}"
-                        }}
-                        "#, host = server.host)
-                    }).collect::<Vec<String>>().join("\n");
-
-                    let layout = format!(r#"
-                    layout {{
-                        pane_template name="ssh" command="ssh" close_on_exit=true
-                        tab name="{tab_name}" {{
-                            {panes}
-                            pane size=1 borderless=true {{
-                                plugin location="zellij:compact-bar"
+                    let panes = self
+                        .selected_servers
+                        .iter()
+                        .map(|server| {
+                            format!(
+                                r#"
+                            ssh {{
+                                args "{host}"
                             }}
-                        }}
-                    }}
-                    "#);
+                        "#,
+                                host = server.host
+                            )
+                        })
+                        .collect::<Vec<String>>()
+                        .join("\n");
+
+                    let layout = self.configuration.layout.get_kdl(tab_name, &panes);
                     eprintln!("DEBUG layout:\n{}", layout);
                     new_tabs_with_layout(&layout);
                     toggle_active_tab_sync();
@@ -210,9 +209,10 @@ impl State {
     }
     fn get_displayed_lines_number(&self) -> usize {
         // self.server_groups.len()
-        self.server_groups.iter().map(|group| {
-            group.servers.len() + 1
-        }).sum()
+        self.server_groups
+            .iter()
+            .map(|group| group.servers.len() + 1)
+            .sum()
     }
     fn resolve_index(&self, index: usize) -> Option<(usize, Option<usize>)> {
         let mut current = 0;
@@ -235,5 +235,63 @@ impl State {
 impl ServerGroup {
     fn all_selected_in(&self, servers: &HashSet<ServerConfig>) -> bool {
         !self.servers.is_empty() && self.servers.iter().all(|server| servers.contains(server))
+    }
+}
+
+impl Configuration {
+    fn new() -> Self {
+        Configuration {
+            layout: ZellijLayout::Default,
+        }
+    }
+
+    fn from_config(config: BTreeMap<String, String>) -> Self {
+        Configuration {
+            layout: ZellijLayout::from_str(config.get("layout").unwrap_or(&"default".to_string())),
+        }
+    }
+}
+
+impl ZellijLayout {
+    fn from_str(layout: &str) -> Self {
+        match layout {
+            "default" => Self::Default,
+            "compact" => Self::Compact,
+            _ => Self::Default,
+        }
+    }
+
+    fn get_kdl(&self, tab_name: &str, panes: &str) -> String {
+        match self {
+            Self::Default => {
+                format!(
+                    r#"layout {{
+                        pane_template name="ssh" command="ssh" close_on_exit=true
+                        tab name="{tab_name}" {{
+                            pane size=1 borderless=true {{
+                                plugin location="tab-bar"
+                            }}
+                            {panes}
+                            pane size=1 borderless=true {{
+                                plugin location="status-bar"
+                            }}
+                        }}
+                    }}"#
+                )
+            }
+            Self::Compact => {
+                format!(
+                    r#"layout {{
+                        pane_template name="ssh" command="ssh" close_on_exit=true
+                        tab name="{tab_name}" {{
+                            {panes}
+                            pane size=1 borderless=true {{
+                                plugin location="zellij:compact-bar"
+                            }}
+                        }}
+                    }}"#
+                )
+            }
+        }
     }
 }
